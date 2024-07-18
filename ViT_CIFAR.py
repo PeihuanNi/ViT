@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-from torchvision.datasets import MNIST
+from torchvision.datasets import CIFAR10
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
@@ -17,11 +17,10 @@ class EmbeddingLayer(nn.Module):
         self.input_size = input_size
         self.embed_size = embed_size
         self.embedding_layer = nn.Linear(self.input_size, self.embed_size, bias=False)
+        # print(self.embedding_layer.weight.shape)
 
     def forward(self, x):
-        # x = x.view(1, -1)
-        # print(x.shape)
-        # print(self.embedding_layer.weight.shape)
+        # print(f'x shape {x.shape}')
         x = self.embedding_layer(x)
         return x
 
@@ -47,6 +46,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.fc = nn.Linear(embed_size, embed_size)
 
     def forward(self, x):
+        # print(x.shape)
         Q1 = self.queries1(x)
         Q2 = self.queries2(x)
         Q3 = self.queries3(x)
@@ -73,7 +73,7 @@ class MultiHeadSelfAttention(nn.Module):
         return output
     
 class ViT(nn.Module):
-    def __init__(self, embed_size, input_size, heads=3):
+    def __init__(self, embed_size, input_size, num_classes, heads=3):
         super(ViT, self).__init__()
         self.embed_size = embed_size
         self.input_size = input_size
@@ -85,7 +85,7 @@ class ViT(nn.Module):
         self.ffn1 = nn.Linear(embed_size, embed_size, bias=False)
         self.relu = nn.ReLU()
         self.ffn2 = nn.Linear(embed_size, embed_size, bias=False)
-        self.fc = nn.Linear(embed_size * input_size, 10, bias=False)
+        self.fc = nn.Linear(embed_size*input_size, num_classes, bias=False)
         self.flatten = nn.Flatten()
         self.softmax = nn.Softmax(dim=1)
 
@@ -99,6 +99,7 @@ class ViT(nn.Module):
         identity = output
         output = self.mul_head_attn2(output)
         output += identity
+        # print(output.shape)
         output = self.norm(output)
         output = self.ffn1(output)
         output = self.relu(output)
@@ -108,31 +109,29 @@ class ViT(nn.Module):
         # print('output')
         # print(output.shape)
         output = self.softmax(output)
+        # print(output.shape)
         
         return output
 
-embed_size = 256
+embed_size = 2048
 num_classes = 10
-batch_size = 64
+batch_size = 256
 num_epochs = 100
 learning_rate = 2e-4
 heads = 3
 
 # 数据预处理
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
-])
+transform = transforms.Compose([transforms.Grayscale(), transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
 
 # 加载数据集
-train_dataset = MNIST(root='D:/Dataset', transform=transform)
+train_dataset = CIFAR10(root='D:/Dataset/CIFAR-10', transform=transform)
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 
-val_dataset = MNIST(root='D:/Dataset', transform=transform)
+val_dataset = CIFAR10(root='D:/Dataset/CIFAR-10', transform=transform)
 val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
 
 # 初始化模型
-model = ViT(embed_size, heads=heads, input_size=28)
+model = ViT(embed_size, heads=heads, input_size=32, num_classes=num_classes)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -140,15 +139,23 @@ device = torch.device('cuda')
 model.to(device)
 
 
+correct = 0
+total = 0
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
+    correct = 0
+    total = 0
     for batch_idx, (images, labels) in enumerate(train_loader):
         images, labels = images.to(device), labels.to(device)
+        images = images.view(-1, 32, 32)
         # print('images and labels have place on gpu')
         # print(f'images shape is: {images.shape}')
         # 前向传播
         outputs = model(images)
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
         loss = criterion(outputs, labels)
         
         # 反向传播和优化
@@ -157,7 +164,7 @@ for epoch in range(num_epochs):
         optimizer.step()
         
         total_loss += loss.item()
-
+    print(f'Accuracy: {100 * correct / total:.2f}%')
     print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(train_loader):.4f}')
 
 # 验证模型
